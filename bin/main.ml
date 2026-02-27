@@ -40,7 +40,7 @@ let main () =
        USAGE: ./oatc [options] <files>\n\
        see README for details about using the compiler";
     
-    process_files !files
+    process_files !files (* when the program first enters driver.ml *)
 
   with Ran_tests ->
     ()
