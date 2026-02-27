@@ -2,6 +2,8 @@ open Printf
 
 module Platform = Util.Platform
 
+
+(* see args in main.ml for all flags, as this is just some of them*)
 (* configuration flags ------------------------------------------------------ *)
 let interpret_ll = ref false   (* run the ll interpreter? *)
 let print_ll_flag = ref false       (* print the generated ll code? *)
@@ -107,9 +109,10 @@ let parse_ll_file filename =
 
 
 let process_ll_ast path file ll_ast =
-  let _ = if !print_ll_flag then print_ll file ll_ast in
+  let _ = if !print_ll_flag then print_ll file ll_ast in (* print the llvm IR file input to be compiled *)
 
   (* Optionally interpret it using the AICE2007 reference interperter. *)
+  (* as in, use part 1a if we want not necessary at all*)
   let _ = if !interpret_ll then
       let result = interpret ll_ast [] in
       Printf.printf "Interpreter Result: %s\n" result
@@ -120,23 +123,24 @@ let process_ll_ast path file ll_ast =
   let dot_o_file = Platform.gen_name !Platform.output_path file ".o" in
 
   let _ =
-    if !clang then begin
+    if !clang then begin (*if using clang flag use clang instead: ! is JUST DEREFERENCE, not logical negation*)
       Platform.verb "* compiling with clang";
       Platform.clang_compile path dot_s_file;
       if !print_x86_flag then begin
         print_banner dot_s_file;
         Platform.sh (Printf.sprintf "cat %s" dot_s_file) Platform.raise_error
       end
-    end else begin
+
+    end else begin (*uses your assembler if clang IR compiler disabled *)
       Platform.verb "* compiling with cis341 backend";
-      let asm_ast = Backend.compile_prog ll_ast in
-      let asm_str = X86.string_of_prog asm_ast in
-      let _ = if !print_x86_flag then print_x86 dot_s_file asm_str in
-      let _ = write_file dot_s_file asm_str in
+      let asm_ast = Backend.compile_prog ll_ast in (* get (ast) abstract syntax tree *)
+      let asm_str = X86.string_of_prog asm_ast in (* convert ast to a string *)
+      let _ = if !print_x86_flag then print_x86 dot_s_file asm_str in (* if enable, print the assembly code to console*)(* again ! is  dereference, not logical negation*)
+      let _ = write_file dot_s_file asm_str in (* always write file out*)
       ()
     end
   in
-  let _ = if !assemble then Platform.assemble dot_s_file dot_o_file in
+  let _ = if !assemble then Platform.assemble dot_s_file dot_o_file in (* assemble and output to object file*)
   let _ = add_link_file dot_o_file in
   ()
 
@@ -157,6 +161,9 @@ let process_file path =
   end
 
 (* process each file separately and then link all of them together *)
+
+(* ================================================================== *)
+(* N.B: this is the function main calls to start the chain*)
 let process_files files =
   if (List.length files) > 0 then begin
 

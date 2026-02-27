@@ -153,7 +153,7 @@ let path_to_basename_ext (path : string) : string * string =
 (* Platform independent shell command *)
 let sh (cmd : string) (ret : string -> int -> 'a) : 'a =
   verb (sprintf "* %s\n" cmd) ;
-  match system cmd with
+  match system cmd (* system bit actually runs the command*) with
   | WEXITED i ->
       ret cmd i
   | WSIGNALED i ->
@@ -222,7 +222,8 @@ let clang_compile (dot_ll : string) (dot_s : string) : unit =
 
 let assemble (dot_s : string) (dot_o : string) : unit =
   sh (sprintf "%s%s %s" (as_cmd ()) dot_o dot_s) raise_error
-
+ (* runs clang to get your executable (object) file, sh actually runs it in on your
+ command line*)
 
 let link (mods : string list) (out_fn : string) : unit =
   sh

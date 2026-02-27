@@ -146,6 +146,8 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
     
   ]
 *)
+let compile_call (c) : =
+  function _ -> failwith "unimplemented compile_call"
 
 
 
