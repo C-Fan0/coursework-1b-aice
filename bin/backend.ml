@@ -172,8 +172,20 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
    - Void, i8, and functions have undefined sizes according to LLVMlite.
      Your function should simply return 0 in those cases
 *)
-let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
-failwith "size_ty not implemented"
+
+(*Abdullah's Implementation + comments for Seb 'might be useful to continue implementing your functions'*)
+let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int = 
+  match t with
+  | Void -> 0 (*Undefined Sizes return 0.*)
+  | I1 -> 8 (*The size of I1 is 8 bytes.*)
+  | I8 -> 0
+  | I64 -> 8
+  | Ptr _ -> 8 (*All pointers are 8 bytes.*)
+  | Struct ts -> List.fold_left (fun acc t -> acc + size_ty tdecls t) 0 ts (*Sum of Values*)
+  | Array (n, t) -> n * size_ty tdecls t (*the size of an array of t's with n elements is n * the size of t*)
+  | Fun _ -> 0 (*Undefined also*)
+  | Namedt tid -> size_ty tdecls (lookup tdecls tid) (*Lookup name to get size.*)
+
 
 
 
@@ -286,7 +298,14 @@ let compile_lbl_block fn lbl ctxt blk : elem =
    [ NOTE: the first six arguments are numbered 0 .. 5 ]
 *)
 let arg_loc (n : int) : operand =
-failwith "arg_loc not implemented"
+  match n with
+  | 0 -> Reg Rdi
+  | 1 -> Reg Rsi
+  | 2 -> Reg Rdx
+  | 3 -> Reg Rcx
+  | 4 -> Reg R08
+  | 5 -> Reg R09
+  | _ -> Ind3 (Imm int64.of_int(8*(n-4)),Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
 
 
 (* We suggest that you create a helper function that computes the
