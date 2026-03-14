@@ -317,8 +317,33 @@ let arg_loc (n : int) : operand =
    - see the discussion about locals
 
 *)
+
+(*The stack function assigns each variable a memory slot on the stack.*)
 let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout not implemented"
+  let all_uids = args
+  @ List.map fst block.insns (*Gets uid from blocks in ll.*)
+
+  @ [fst block.term] (*Gets furst thing from the term in blocks.*)
+
+
+
+  @ List.concat_map (fun (label, b) ->
+    let insn_uids = List.map fst b.insns in
+    let term_uid = [fst b.term] in
+    insn_uids @ term_uid
+  ) lbled_blocks
+
+
+   in (*next is using the uid to do what is below*)
+  
+
+
+  List.mapi (fun i uid ->
+    let offset = - (i + 1) * 8 in
+    (uid, Ind3 (Lit (Int64.of_int offset), Rbp)) (*Pair the uid with its place in memory on the stack.*)
+  ) all_uids
+
+
 
 (* The code for the entry-point of a function must do several things:
 
