@@ -146,6 +146,8 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
     
   ]
 *)
+let compile_call (c) : =
+  function _ -> failwith "unimplemented compile_call"
 
 
 
@@ -307,6 +309,7 @@ let arg_loc (n : int) : operand =
   | 5 -> Reg R09
   | _ -> Ind3 (Imm int64.of_int(8*(n-4)),Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
 
+  
 
 (* We suggest that you create a helper function that computes the
    stack layout for a given function declaration.
