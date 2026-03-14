@@ -174,8 +174,20 @@ let compile_call (c) : =
    - Void, i8, and functions have undefined sizes according to LLVMlite.
      Your function should simply return 0 in those cases
 *)
-let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
-failwith "size_ty not implemented"
+
+(*Abdullah's Implementation + comments for Seb 'might be useful to continue implementing your functions'*)
+let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int = 
+  match t with
+  | Void -> 0 (*Undefined Sizes return 0.*)
+  | I1 -> 8 (*The size of I1 is 8 bytes.*)
+  | I8 -> 0
+  | I64 -> 8
+  | Ptr _ -> 8 (*All pointers are 8 bytes.*)
+  | Struct ts -> List.fold_left (fun acc t -> acc + size_ty tdecls t) 0 ts (*Sum of Values*)
+  | Array (n, t) -> n * size_ty tdecls t (*the size of an array of t's with n elements is n * the size of t*)
+  | Fun _ -> 0 (*Undefined also*)
+  | Namedt tid -> size_ty tdecls (lookup tdecls tid) (*Lookup name to get size.*)
+
 
 
 
@@ -296,6 +308,7 @@ let arg_loc (n : int) : operand =
   | 4 -> Reg R08
   | 5 -> Reg R09
   | _ -> Ind3 (Imm int64.of_int(8*(n-4)),Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
+
   
 
 (* We suggest that you create a helper function that computes the
@@ -307,8 +320,33 @@ let arg_loc (n : int) : operand =
    - see the discussion about locals
 
 *)
+
+(*The stack function assigns each variable a memory slot on the stack.*)
 let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout not implemented"
+  let all_uids = args
+  @ List.map fst block.insns (*Gets uid from blocks in ll.*)
+
+  @ [fst block.term] (*Gets furst thing from the term in blocks.*)
+
+
+
+  @ List.concat_map (fun (label, b) ->
+    let insn_uids = List.map fst b.insns in
+    let term_uid = [fst b.term] in
+    insn_uids @ term_uid
+  ) lbled_blocks
+
+
+   in (*next is using the uid to do what is below*)
+  
+
+
+  List.mapi (fun i uid ->
+    let offset = - (i + 1) * 8 in
+    (uid, Ind3 (Lit (Int64.of_int offset), Rbp)) (*Pair the uid with its place in memory on the stack.*)
+  ) all_uids
+
+
 
 (* The code for the entry-point of a function must do several things:
 
