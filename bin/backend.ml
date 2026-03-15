@@ -91,9 +91,23 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
-  function _ -> failwith "compile_operand unimplemented"
 
+
+(*Use this from the file ll.ml:
+type operand =
+| Null
+| Const of int64
+| Gid of gid
+| Id of uid
+*)
+
+(*Chec x86 file for instrunctions*)
+let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
+  function
+  | Null    -> (Movq, [Imm (Lit 0L); dest])                          
+  | Const c -> (Movq, [Imm (Lit c); dest])                          
+  | Gid gid -> (Leaq, [Ind3 (Lbl (Platform.mangle gid), Rip); dest]) 
+  | Id uid  -> (Movq, [lookup ctxt.layout uid; dest])        
 
 
 (* compiling call  ---------------------------------------------------------- *)
@@ -307,7 +321,7 @@ let arg_loc (n : int) : operand =
   | 3 -> Reg Rcx
   | 4 -> Reg R08
   | 5 -> Reg R09
-  | _ -> Ind3 (Imm int64.of_int(8*(n-4)),Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
+  | _ -> Ind3 (Lit (Int64.of_int (16 + (n-6)*8)), Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
 
   
 
