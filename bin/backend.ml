@@ -91,9 +91,23 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
-  function _ -> failwith "compile_operand unimplemented"
 
+
+(*Use this from the file ll.ml:
+type operand =
+| Null
+| Const of int64
+| Gid of gid
+| Id of uid
+*)
+
+(*Chec x86 file for instrunctions*)
+let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
+  function
+  | Null    -> (Movq, [Imm (Lit 0L); dest])                          
+  | Const c -> (Movq, [Imm (Lit c); dest])                          
+  | Gid gid -> (Leaq, [Ind3 (Lbl (Platform.mangle gid), Rip); dest]) 
+  | Id uid  -> (Movq, [lookup ctxt.layout uid; dest])          
 
 
 (* compiling call  ---------------------------------------------------------- *)
