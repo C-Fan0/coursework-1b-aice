@@ -160,10 +160,12 @@ let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
     
   ]
 *)
+
+(* Now unecessary function as abudllah implemented it in compile insn
 let compile_call (c) : insn list =
   
-  function _ -> failwith "unimplemented compile_call"
-
+ function _ -> failwith "unimplemented compile_call"
+*)
 
 
 
