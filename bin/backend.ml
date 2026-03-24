@@ -91,9 +91,23 @@ let lookup m x = List.assoc x m
    the X86 instruction that moves an LLVM operand into a designated
    destination (usually a register).
 *)
-let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
-  function _ -> failwith "compile_operand unimplemented"
 
+
+(*Use this from the file ll.ml:
+type operand =
+| Null
+| Const of int64
+| Gid of gid
+| Id of uid
+*)
+
+(*Chec x86 file for instrunctions*)
+let compile_operand (ctxt:ctxt) (dest:X86.operand) : Ll.operand -> ins =
+  function
+  | Null    -> (Movq, [Imm (Lit 0L); dest])                          
+  | Const c -> (Movq, [Imm (Lit c); dest])                          
+  | Gid gid -> (Leaq, [Ind3 (Lbl (Platform.mangle gid), Rip); dest]) 
+  | Id uid  -> (Movq, [lookup ctxt.layout uid; dest]) 
 
 
 (* compiling call  ---------------------------------------------------------- *)
@@ -175,8 +189,20 @@ let compile_call (c) : insn list =
    - Void, i8, and functions have undefined sizes according to LLVMlite.
      Your function should simply return 0 in those cases
 *)
-let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
-failwith "size_ty not implemented"
+
+(*Abdullah's Implementation + comments for Seb 'might be useful to continue implementing your functions'*)
+let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int = 
+  match t with
+  | Void -> 0 (*Undefined Sizes return 0.*)
+  | I1 -> 8 (*The size of I1 is 8 bytes.*)
+  | I8 -> 0
+  | I64 -> 8
+  | Ptr _ -> 8 (*All pointers are 8 bytes.*)
+  | Struct ts -> List.fold_left (fun acc t -> acc + size_ty tdecls t) 0 ts (*Sum of Values*)
+  | Array (n, t) -> n * size_ty tdecls t (*the size of an array of t's with n elements is n * the size of t*)
+  | Fun _ -> 0 (*Undefined also*)
+  | Namedt tid -> size_ty tdecls (lookup tdecls tid) (*Lookup name to get size.*)
+
 
 
 
@@ -207,8 +233,9 @@ failwith "size_ty not implemented"
       by the path so far
 *)
 let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
-failwith "compile_gep not implemented"
+  let (ty, base_op) = op in
 
+(*For Sebastian.*)
 
 
 (* compiling instructions  -------------------------------------------------- *)
@@ -234,9 +261,123 @@ failwith "compile_gep not implemented"
 
    - Bitcast: does nothing interesting at the assembly level
 *)
-let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
-      failwith "compile_insn not implemented"
+(* compiling instructions  -------------------------------------------------- *)
 
+let compile_insn (ctxt:ctxt) ((uid:uid), (i:Ll.insn)) : X86.ins list =
+
+  let dest = if uid = "" then Reg Rax else lookup ctxt.layout uid in
+  match i with
+  | Binop (bop, _, op1, op2) ->
+      let mv1 = compile_operand ctxt (Reg Rax) op1 in
+      let mv2 = compile_operand ctxt (Reg Rcx) op2 in
+
+      (*Convertz each LLVM operand to x86.*)
+      let op  = match bop with
+        | Add  -> (Addq,  [Reg Rcx; Reg Rax])
+        | Sub  -> (Subq,  [Reg Rcx; Reg Rax])
+        | Mul  -> (Imulq, [Reg Rcx; Reg Rax])
+        | And  -> (Andq,  [Reg Rcx; Reg Rax])
+        | Or   -> (Orq,   [Reg Rcx; Reg Rax])
+        | Xor  -> (Xorq,  [Reg Rcx; Reg Rax])
+        | Shl  -> (Shlq,  [Reg Rcx; Reg Rax])
+        | Lshr -> (Shrq,  [Reg Rcx; Reg Rax])
+        | Ashr -> (Sarq,  [Reg Rcx; Reg Rax])
+      in
+      [ mv1; mv2; op; (Movq, [Reg Rax; dest]) ]
+
+
+      (*Get space on stack.*)
+  | Alloca ty ->
+
+      let alloc_size = max 8 (size_ty ctxt.tdecls ty) in
+      [ (Subq, [Imm (Lit (Int64.of_int alloc_size)); Reg Rsp])
+      ; (Movq, [Reg Rsp; dest])
+      ]
+(*Load from memory.*)
+  | Load (_, op) ->
+      [ compile_operand ctxt (Reg Rax) op
+      ; (Movq, [Ind2 Rax; Reg Rcx])
+      ; (Movq, [Reg Rcx; dest])
+      ]
+
+  | Store (_, op, ptr) ->
+      [ compile_operand ctxt (Reg Rax) op
+      ; compile_operand ctxt (Reg Rcx) ptr
+      ; (Movq, [Reg Rax; Ind2 Rcx])
+      ]
+
+  | Icmp (cnd, _, op1, op2) ->
+      [ compile_operand ctxt (Reg Rax) op1
+      ; compile_operand ctxt (Reg Rcx) op2
+      ; (Cmpq, [Reg Rcx; Reg Rax])
+      ; (Movq, [Imm (Lit 0L); dest])
+      ; (Set (compile_cnd cnd), [dest])
+      ]
+
+  | Call (_, op, args) ->
+      let regs = [| Reg Rdi; Reg Rsi; Reg Rdx; Reg Rcx; Reg R08; Reg R09 |] in
+      let reg_args   = List.filteri (fun i _ -> i < 6) args in
+      let stack_args = List.rev (List.filteri (fun i _ -> i >= 6) args) in
+      let n_stack    = List.length stack_args in
+      
+    
+      let reg_inss   = List.concat_map (fun (i, (_, o)) ->
+        [compile_operand ctxt regs.(i) o]
+      ) (List.mapi (fun i a -> (i, a)) reg_args) in
+    
+     
+      let align_and_pad =
+        if n_stack > 0 then
+          [(Andq, [Imm (Lit (-16L)); Reg Rsp])]
+          @ (if n_stack mod 2 = 1 then [(Subq, [Imm (Lit 8L); Reg Rsp])] else [])
+        else []
+      in
+      
+      
+      let stack_inss = List.concat_map (fun (_, o) ->
+        [ compile_operand ctxt (Reg Rax) o
+        ; (Pushq, [Reg Rax])
+        ]
+      ) stack_args in
+      
+    
+      let cleanup =
+        if n_stack > 0 then
+          let total = n_stack + (if n_stack mod 2 = 1 then 1 else 0) in
+          [(Addq, [Imm (Lit (Int64.of_int (total * 8))); Reg Rsp])]
+        else []
+      in
+      
+  
+      let save_ret =
+        if uid = "" then []
+        else [(Movq, [Reg Rax; dest])]
+      in
+      
+      
+      (match op with
+       | Gid gid ->
+           reg_inss @ align_and_pad @ stack_inss
+           @ [(Movq, [Imm (Lit 0L); Reg Rax])] 
+           @ [(Callq, [Imm (Lbl (Platform.mangle gid))])]
+           @ cleanup @ save_ret
+       | _ ->
+           
+           let mv = compile_operand ctxt (Reg R10) op in
+           reg_inss @ align_and_pad @ stack_inss
+           @ [mv]
+           @ [(Movq, [Imm (Lit 0L); Reg Rax])] 
+           @ [(Callq, [Reg R10])]
+           @ cleanup @ save_ret)
+
+  | Bitcast (_, op, _) ->
+      [ compile_operand ctxt (Reg Rax) op (*Already Don.*)
+      ; (Movq, [Reg Rax; dest])
+      ]
+
+  | Gep (ty, op, path) ->
+      compile_gep ctxt (ty, op) path  (*Function from Seb.*)
+      @ [(Movq, [Reg Rax; dest])]
 
 
 (* compiling terminators  --------------------------------------------------- *)
@@ -258,7 +399,27 @@ let mk_lbl (fn:string) (l:string) = fn ^ "." ^ l
    [fn] - the name of the function containing this terminator
 *)
 let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
-  failwith "compile_terminator not implemented"
+  match t with
+
+  | Ret (_, None) ->                                   
+      [ (Movq, [Reg Rbp; Reg Rsp])
+      ; (Popq, [Reg Rbp])
+      ; (Retq, [])
+      ]
+  | Ret (_, Some op) ->                                 
+      [ compile_operand ctxt (Reg Rax) op
+      ; (Movq, [Reg Rbp; Reg Rsp])
+      ; (Popq, [Reg Rbp])
+      ; (Retq, [])
+      ]
+  | Br lbl ->                                           
+      [ (Jmp, [Imm (Lbl (mk_lbl fn lbl))]) ]
+  | Cbr (op, lbl1, lbl2) ->                            
+      [ compile_operand ctxt (Reg Rax) op
+      ; (Cmpq, [Imm (Lit 1L); Reg Rax])
+      ; (J Eq, [Imm (Lbl (mk_lbl fn lbl1))])
+      ; (Jmp,  [Imm (Lbl (mk_lbl fn lbl2))])
+      ]
 
 
 (* compiling blocks --------------------------------------------------------- *)
@@ -269,7 +430,10 @@ let compile_terminator (fn:string) (ctxt:ctxt) (t:Ll.terminator) : ins list =
    [blk]  - LLVM IR code for the block
 *)
 let compile_block (fn:string) (ctxt:ctxt) (blk:Ll.block) : ins list =
-  failwith "compile_block not implemented"
+ (*Turns an LLVMlite basic block into a list of x86 instructions then labels to x86.*)
+  let insns = List.concat_map (compile_insn ctxt) blk.insns in  
+  let term  = compile_terminator fn ctxt (snd blk.term) in     
+  insns @ term
 
 let compile_lbl_block fn lbl ctxt blk : elem =
   Asm.text (mk_lbl fn lbl) (compile_block fn ctxt blk)
@@ -296,7 +460,12 @@ let arg_loc (n : int) : operand =
   | 3 -> Reg Rcx
   | 4 -> Reg R08
   | 5 -> Reg R09
+<<<<<<< HEAD
   | _ -> Ind3 (Lit (Int64.of_int(8*(n-4))), Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
+=======
+  | _ -> Ind3 (Lit (Int64.of_int (16 + (n-6)*8)), Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
+
+>>>>>>> ab59ba67ec39a8fd0a0c377772d44c81fc752a10
   
 
 (* We suggest that you create a helper function that computes the
@@ -308,8 +477,33 @@ let arg_loc (n : int) : operand =
    - see the discussion about locals
 
 *)
+
+(*The stack function assigns each variable a memory slot on the stack.*)
 let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
-failwith "stack_layout not implemented"
+  let all_uids = args
+  @ List.map fst block.insns (*Gets uid from blocks in ll.*)
+
+  @ [fst block.term] (*Gets furst thing from the term in blocks.*)
+
+
+
+  @ List.concat_map (fun (_, b) ->
+    let insn_uids = List.map fst b.insns in
+    let term_uid = [fst b.term] in
+    insn_uids @ term_uid
+  ) lbled_blocks
+
+
+   in (*next is using the uid to do what is below*)
+  
+
+
+  List.mapi (fun i uid ->
+    let offset = - (i + 1) * 8 in
+    (uid, Ind3 (Lit (Int64.of_int offset), Rbp)) (*Pair the uid with its place in memory on the stack.*)
+  ) all_uids
+
+
 
 (* The code for the entry-point of a function must do several things:
 
@@ -328,9 +522,7 @@ failwith "stack_layout not implemented"
      to hold all of the local stack slots.
 *)
 let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_param; f_cfg; _ }:fdecl) : prog =
-failwith "compile_fdecl unimplemented"
-
-
+(*Seb Function*)
 
 (* compile_gdecl ------------------------------------------------------------ *)
 (* Compile a global value into an X86 global data declaration and map
