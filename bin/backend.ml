@@ -563,6 +563,28 @@ let stack_layout (args : uid list) ((block, lbled_blocks):cfg) : layout =
      to hold all of the local stack slots.
 *)
 let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_param; f_cfg; _ }:fdecl) : prog =
+  let layout = stack_layout f_param f_cfg in
+  let ctxt = { tdecls; layout } in
+  let stack_size = List.length layout * 8 in
+
+  let prologue =
+    [ (Pushq, [Reg Rbp])
+    ; (Movq,  [Reg Rsp; Reg Rbp])
+    ; (Subq,  [Imm (Lit (Int64.of_int stack_size)); Reg Rsp])
+    ] in
+
+  let arg_code = List.mapi (fun i uid ->
+    (Movq, [arg_loc i; lookup layout uid])
+  ) f_param in
+
+  let (entry_block, lbled_blocks) = f_cfg in
+  let entry_code = compile_block name ctxt entry_block in
+  let lbled_elems = List.map (fun (lbl, blk) ->
+    compile_lbl_block name lbl ctxt blk
+  ) lbled_blocks in
+
+  [Asm.text (Platform.mangle name) (prologue @ arg_code @ entry_code)]
+  @ lbled_elems
 (*Seb Function*)
 
 (* compile_gdecl ------------------------------------------------------------ *)
