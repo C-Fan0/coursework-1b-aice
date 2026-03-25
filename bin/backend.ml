@@ -266,6 +266,9 @@ let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : 
         @ walk elem_ty rest
       | Namedt name ->
         walk (lookup ctxt.tdecls name) (idx :: rest)
+      | Ptr inner_ty ->
+        add_scaled_offset idx (size_ty ctxt.tdecls inner_ty)
+        @ walk inner_ty rest
       | _ -> failwith "invalid gep path"
       )
   in
@@ -273,9 +276,13 @@ let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : 
   match path with
   | [] -> failwith "gep needs at least one index"
   | first :: rest ->
-    let first_code = add_scaled_offset first (size_ty ctxt.tdecls ty) in
-    base_code @ first_code @ walk ty rest
-    
+    let rec resolve_ty t = match t with
+      | Namedt name -> resolve_ty (lookup ctxt.tdecls name)
+      | t -> t
+    in
+    let resolved_ty = resolve_ty ty in
+    let first_code = add_scaled_offset first (size_ty ctxt.tdecls resolved_ty) in
+    base_code @ first_code @ walk resolved_ty rest
 (*For Sebastian.*)
 
 
@@ -501,12 +508,8 @@ let arg_loc (n : int) : operand =
   | 3 -> Reg Rcx
   | 4 -> Reg R08
   | 5 -> Reg R09
-<<<<<<< HEAD
-  | _ -> Ind3 (Lit (Int64.of_int(8*(n-4))), Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
-=======
   | _ -> Ind3 (Lit (Int64.of_int (16 + (n-6)*8)), Rbp) (* stack is organised like a fifo. 0-based indexing, slides use 1 based but that's confusing. due to calling conventions, arg 6 starts at Rbp+16 *)
 
->>>>>>> ab59ba67ec39a8fd0a0c377772d44c81fc752a10
   
 
 (* We suggest that you create a helper function that computes the
@@ -573,9 +576,15 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_param; f_cfg; _ }:
     ; (Subq,  [Imm (Lit (Int64.of_int stack_size)); Reg Rsp])
     ] in
 
-  let arg_code = List.mapi (fun i uid ->
-    (Movq, [arg_loc i; lookup layout uid])
-  ) f_param in
+    let arg_code = List.mapi (fun i uid ->
+      let src = arg_loc i in
+      let dst = lookup layout uid in
+      match src with
+      | Ind3 _ -> (* stack arg, needs intermediate register *)
+        [ (Movq, [src; Reg Rax])
+        ; (Movq, [Reg Rax; dst]) ]
+      | _ -> [(Movq, [src; dst])]
+    ) f_param |> List.flatten in
 
   let (entry_block, lbled_blocks) = f_cfg in
   let entry_code = compile_block name ctxt entry_block in
@@ -583,7 +592,7 @@ let compile_fdecl (tdecls:(tid * ty) list) (name:string) ({ f_param; f_cfg; _ }:
     compile_lbl_block name lbl ctxt blk
   ) lbled_blocks in
 
-  [Asm.text (Platform.mangle name) (prologue @ arg_code @ entry_code)]
+  [Asm.gtext (Platform.mangle name) (prologue @ arg_code @ entry_code)]
   @ lbled_elems
 (*Seb Function*)
 
