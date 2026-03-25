@@ -276,9 +276,11 @@ let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : 
   match path with
   | [] -> failwith "gep needs at least one index"
   | first :: rest ->
-    let rec resolve_ty t = match t with
+    let rec resolve_ty t =
+      match t with
       | Namedt name -> resolve_ty (lookup ctxt.tdecls name)
-      | t -> t
+      | Ptr inner   -> resolve_ty inner
+      | t           -> t
     in
     let resolved_ty = resolve_ty ty in
     let first_code = add_scaled_offset first (size_ty ctxt.tdecls resolved_ty) in
