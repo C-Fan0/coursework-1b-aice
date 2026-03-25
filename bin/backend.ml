@@ -236,7 +236,46 @@ let rec size_ty (tdecls:(tid * ty) list) (t:Ll.ty) : int =
 *)
 let compile_gep (ctxt:ctxt) (op : Ll.ty * Ll.operand) (path: Ll.operand list) : ins list =
   let (ty, base_op) = op in
+  let base_code = [compile_operand ctxt (Reg Rax) base_op] in
 
+  let add_scaled_offset idx_op scale =
+    [ compile_operand ctxt (Reg Rcx) idx_op
+    ; (Imulq, [Imm (Lit (Int64.of_int scale)); Reg Rcx])
+    ; (Addq,  [Reg Rcx; Reg Rax])
+    ]
+  in
+
+  let rec walk ty path =
+    match path with
+    | [] -> []
+    | idx :: rest ->
+      (match ty with
+      | Struct fields -> (
+          match idx with
+          | Const n ->
+            let n = Int64.to_int n in
+            let offset = List.fold_left (fun acc f -> acc + size_ty ctxt.tdecls f) 0
+                           (List.filteri (fun i _ -> i < n) fields) in
+            let next_ty = List.nth fields n in
+            [(Addq, [Imm (Lit (Int64.of_int offset)); Reg Rax])]
+            @ walk next_ty rest
+          | _ -> failwith "struct index must be constant"
+        )
+      | Array (_, elem_ty) ->
+        add_scaled_offset idx (size_ty ctxt.tdecls elem_ty)
+        @ walk elem_ty rest
+      | Namedt name ->
+        walk (lookup ctxt.tdecls name) (idx :: rest)
+      | _ -> failwith "invalid gep path"
+      )
+  in
+
+  match path with
+  | [] -> failwith "gep needs at least one index"
+  | first :: rest ->
+    let first_code = add_scaled_offset first (size_ty ctxt.tdecls ty) in
+    base_code @ first_code @ walk ty rest
+    
 (*For Sebastian.*)
 
 
